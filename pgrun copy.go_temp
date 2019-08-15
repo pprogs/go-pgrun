@@ -1,0 +1,333 @@
+package main
+
+import (
+	"errors"
+	"flag"
+	"log"
+	"os"
+	"regexp"
+	"runtime"
+	"strings"
+
+	"github.com/go-pg/pg"
+	"github.com/hashicorp/go-version"
+
+	sutils "github.com/pprogs/simpleutils"
+)
+
+type configFile struct {
+	User     string `json:"user"`
+	Password string `json:"password"`
+	Database string `json:"database"`
+}
+
+var (
+	db      *pg.DB
+	dbOpt   *pg.Options
+	err     error
+	conf    *configFile
+	data    []byte
+	lg      *log.Logger
+	spaceRx *regexp.Regexp
+	valRx   *regexp.Regexp
+)
+
+func main() {
+	os.Exit(mainFunc())
+}
+
+func mainFunc() int {
+
+	lg = log.New(os.Stdout, "", log.LstdFlags|log.Lshortfile)
+
+	confFlag := flag.String("config", "", "Path to config file")
+	dataFlag := flag.String("data", "", "Path to data file")
+	flag.Parse()
+
+	if *confFlag == "" || *dataFlag == "" {
+		flag.PrintDefaults()
+		return 1
+	}
+
+	confFile := *confFlag
+	dataFile := *dataFlag
+
+	conf = &configFile{}
+	if _, err = sutils.ReadJSON(confFile, conf); err != nil {
+		lg.Printf("Could not read CONFIG file from %s!\n", confFile)
+		return 1
+	}
+
+	if data, err = sutils.ReadFileData(dataFile); err != nil {
+		lg.Printf("Could not read DATA file from %s!\n", dataFile)
+		return 1
+	}
+
+	commands := string(data)
+
+	dbOpt = &pg.Options{
+		User:     conf.User,
+		Password: conf.Password,
+		Database: conf.Database,
+	}
+
+	db = pg.Connect(dbOpt)
+
+	if db == nil {
+		lg.Printf("Could not open DB connection!\n")
+		return 1
+	}
+
+	defer func() {
+		if db != nil {
+			lg.Printf("Closing db connection")
+			db.Close()
+		}
+	}()
+
+	req := strings.Split(commands, "GO")
+
+	var tx *pg.Tx
+
+	for _, r := range req {
+
+		r = parseCond(r)
+		r = strings.TrimSpace(r)
+
+		if strings.HasPrefix(r, `\db`) {
+
+			dbName := strings.TrimPrefix(r, `\db `)
+			lg.Printf("Reconnect to database (%s)\n", dbName)
+			db.Close()
+			dbOpt.Database = dbName
+			db = pg.Connect(dbOpt)
+			continue
+		}
+
+		if strings.HasPrefix(r, `\needVer`) {
+			verStr := strings.TrimPrefix(r, `\needVer `)
+			ret := checkVer(verStr)
+			if ret == 2 {
+				return 1 //error
+			}
+			if ret == 1 {
+				return 0 //wrong ver
+			}
+			continue
+		}
+
+		if len(r) > 0 {
+
+			lg.Printf("Query:%s\n", r)
+
+			if tx, err = db.Begin(); err != nil {
+				break
+			}
+
+			if _, err = db.Exec(r); err != nil {
+				tx.Rollback()
+				break
+			}
+
+			tx.Commit()
+		}
+	}
+
+	if err != nil {
+		lg.Printf("Error:%+v\n", err)
+		return 1
+	}
+
+	lg.Printf("Done without errors!\n")
+	return 0
+}
+
+func checkVer(verStr string) int {
+
+	var ver *version.Version
+	var pgVer *version.Version
+
+	ver, err = version.NewVersion(verStr)
+	if err != nil {
+		lg.Printf("Cannot parse version (%s)\n", verStr)
+		return 2
+	}
+
+	q := `SELECT pg_catalog.shobj_description(d.oid, 'pg_database') AS "Description"
+			FROM   pg_catalog.pg_database d
+			WHERE  datname = current_database();`
+
+	pgVerStr := ""
+	if _, err = db.Query(pg.Scan(&pgVerStr), q); err != nil {
+		lg.Printf("Cannot get version from PG\n")
+		return 2
+	}
+
+	pgVer, err = version.NewVersion(pgVerStr)
+	if err != nil {
+		lg.Printf("Cannot parse PG version (%s)\n", pgVerStr)
+		return 2
+	}
+
+	if !pgVer.Equal(ver) {
+		lg.Printf("PG ver %s != file ver %s\n", pgVerStr, verStr)
+		return 1
+	}
+
+	lg.Printf("Version ok\n")
+	return 0
+}
+
+func parseCond(input string) string {
+
+	if !strings.Contains(input, "--##") {
+		return input
+	}
+
+	var skipBlock bool
+	var builder strings.Builder
+
+	strs := strings.Split(strings.Replace(input, "\r\n", "\n", -1), "\n")
+
+	for _, s := range strs {
+
+		if len(s) == 0 {
+			continue
+		}
+
+		if strings.HasPrefix(s, "--##OS") {
+			osName := strings.ToLower(strings.TrimPrefix(s, "--##OS "))
+			if osName != runtime.GOOS {
+				skipBlock = true
+			}
+			continue
+		}
+
+		if strings.HasPrefix(s, "--##OS") {
+			skipBlock = false
+			continue
+		}
+
+		if !skipBlock {
+			builder.WriteString(s)
+		}
+	}
+
+	return builder.String()
+}
+
+func generateBatches(input string) <-chan string {
+
+	c := make(chan string)
+
+	spaceRx = regexp.MustCompile(`\s+`)
+	valRx = regexp.MustCompile(`\\((\w+)\s*(\w+)?\s*(\w+)?)?`)
+	vals := make(map[string]string)
+
+	go func() {
+
+		defer close(c)
+
+		// split input
+		strAr := strings.Split(strings.Replace(input, "\r\n", "\n", -1), "\n")
+		b := strings.Builder{}
+		skip := false
+
+		for idx := range strAr {
+
+			s := strings.TrimSpace(strAr[idx])
+
+			if len(s) == 0 {
+				continue
+			}
+
+			//check for commands
+			if strings.HasPrefix(s, "/") {
+
+				v := valRx.FindAllStringSubmatch(s, -1)
+
+				if len(v) == 0 {
+					continue
+				}
+
+				command := strings.ToLower(v[0][0])
+				val1 := ""
+				val2 := ""
+				if len(v[0]) > 1 {
+					val1 = v[0][1]
+				}
+				if len(v[0]) > 2 {
+					val2 = v[0][2]
+				}
+
+				if command == "go" {
+					if b.Len() > 0 {
+						c <- b.String()
+						b.Reset()
+					}
+					continue
+				}
+
+				//os check
+				if command == "os" && val1 != "" {
+					if strings.ToLower(val1) != runtime.GOOS {
+						skip = true
+					} else {
+						skip = false
+					}
+					continue
+				}
+
+				//stop os check
+				if command == "os" && val1 == "" {
+					skip = false
+					continue
+				}
+
+				//set vals
+				if command == "val" && val1 != "" && val2 != "" {
+					vals[val1] = val2
+				}
+
+				//check version
+				if command == "needver" && val1 != "" {
+					ret := checkVer(val1)
+					if ret == 2 {
+						err = errors.New("error parsing version")
+						return
+					}
+					if ret == 1 {
+						err = errors.New("wrong version")
+						return
+					}
+
+					continue
+				}
+
+				//db
+				if command == "db" && val1 != "" {
+					lg.Printf("Reconnect to database (%s)\n", val1)
+					db.Close()
+					dbOpt.Database = val1
+					db = pg.Connect(dbOpt)
+
+					continue
+				}
+
+				continue
+			}
+
+			//add to batch
+			if !skip {
+				b.WriteString(s)
+			}
+
+		}
+
+		if b.Len() > 0 {
+			c <- b.String()
+		}
+	}()
+
+	return c
+}
