@@ -44,7 +44,7 @@ func mainFunc() int {
 	confFlag := flag.String("C", "config.json", "Path to config file")
 	dataFlag := flag.String("D", "", "Path to data file")
 
-	flag.Var(&vals, "V", "Set value. Must be in format -V name,value")
+	flag.Var(&vals, "V", "Set value. Must be in format -V name,value. Can be added multiple V flags")
 
 	flag.Parse()
 
