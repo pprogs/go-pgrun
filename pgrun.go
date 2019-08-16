@@ -221,13 +221,6 @@ func generateBatches(input string) <-chan string {
 
 				lg.Printf("Running command %s (%s) (%s)\n", command, val1, val2)
 
-				if command == "go" {
-					if !runBatch(&b) {
-						return
-					}
-					continue
-				}
-
 				//os check
 				if command == "os" && val1 != "" {
 					if strings.ToLower(val1) != runtime.GOOS {
@@ -241,6 +234,19 @@ func generateBatches(input string) <-chan string {
 				//stop os check
 				if command == "os" && val1 == "" {
 					skip = false
+					continue
+				}
+
+				//os check also skips commands
+				if skip {
+					continue
+				}
+
+				//run batch
+				if command == "go" {
+					if !runBatch(&b) {
+						return
+					}
 					continue
 				}
 

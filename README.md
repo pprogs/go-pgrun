@@ -21,26 +21,43 @@ Simple config.json:
 
 Simple data file:
 ```sql
-\val dbname remdesk
-\val nedver 0.1.3
-\val curver 0.1.4
+\val dbname devDb
+\val user devUser
+\val ver 0.1.1
 
---reconnect to another db
+\os windows
+\val collate Russian_Russia.1251
+\os linux
+\val collate ru-Ru.utf8
+\os
+
+DROP DATABASE IF EXISTS ##dbname##;
+\go
+
+CREATE DATABASE ##dbname##
+    WITH 
+    OWNER = ##user##
+    ENCODING = 'UTF8'
+    LC_COLLATE = '##collate##' 
+    LC_CTYPE = '##collate##'
+    TABLESPACE = pg_default
+    CONNECTION LIMIT = -1
+    TEMPLATE template0;
+\go
+
+--reconnect to db
 \db ##dbname##
 
 --check for db version
 --breaks execution if not equal
 --version is stored as comment on database 
-\needVer ##nedver##
+--\needVer ##ver##
 
 \os windows
-COMMENT ON DATABASE ##dbname## IS '##curver##';
+COMMENT ON DATABASE ##dbname## IS '##ver##';
 \os linux
-COMMENT ON DATABASE ##dbname## IS '0.2.3';
+COMMENT ON DATABASE ##dbname## IS 'im on linux';
 \os
-
---run batch
-\go
 ```
 
 Versions must follow [SemVer](http://semver.org/).
