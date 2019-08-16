@@ -4,10 +4,17 @@ Simple CLI tool to run sql commands from files against postgresql
 
 Command line flags:
 ```
--C string
-    Path to config file (default "config.json")
--D string
-    Path to data file
+  -C string
+        Path to config file (default "config.json")
+  -D string
+        Path to data file
+  -V value
+        Set value. Must be in format -V name,value
+```
+
+-V can be used multiple times like
+```
+go-pgrun -D commands.sql -V dbname,dev -V needver,0.1.4
 ```
 
 Simple config.json:
