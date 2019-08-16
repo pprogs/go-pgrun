@@ -3,7 +3,6 @@ package main
 import (
 	"errors"
 	"flag"
-	"fmt"
 	"log"
 	"os"
 	"regexp"
@@ -31,6 +30,7 @@ var (
 	lg    *log.Logger
 	valRx *regexp.Regexp
 	sync  chan bool
+	vals  valFlag
 )
 
 func main() {
@@ -43,6 +43,9 @@ func mainFunc() int {
 
 	confFlag := flag.String("C", "config.json", "Path to config file")
 	dataFlag := flag.String("D", "", "Path to data file")
+
+	flag.Var(&vals, "V", "Set value. Must be in format -V name,value")
+
 	flag.Parse()
 
 	if *confFlag == "" || *dataFlag == "" {
@@ -157,8 +160,7 @@ func generateBatches(input string) <-chan string {
 	c := make(chan string)
 
 	valRx = regexp.MustCompile(`^\\(\w+)\s*([\w#\d.]+)?\s*([\w#\d.]+)?$`)
-	vals := make([]string, 0, 100)
-	var repl *strings.Replacer
+	repl := vals.Replacer()
 
 	runBatch := func(b *strings.Builder) bool {
 		if b.Len() > 0 {
@@ -252,8 +254,8 @@ func generateBatches(input string) <-chan string {
 
 				//set vals
 				if command == "val" && val1 != "" && val2 != "" {
-					vals = append(vals, fmt.Sprintf("##%s##", val1), val2)
-					repl = strings.NewReplacer(vals...)
+					vals.Add(val1, val2)
+					repl = vals.Replacer()
 					continue
 				}
 
