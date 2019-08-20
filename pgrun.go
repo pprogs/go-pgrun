@@ -159,7 +159,7 @@ func generateBatches(input string) <-chan string {
 
 	c := make(chan string)
 
-	valRx = regexp.MustCompile(`^\\(\w+)\s*([\w#\d.]+)?\s*([\w#\d.]+)?$`)
+	valRx = regexp.MustCompile(`^\\(\w+)\s*([\w#\d.]+)?\s*([\S]+)?$`)
 	repl := vals.Replacer()
 
 	runBatch := func(b *strings.Builder) bool {
