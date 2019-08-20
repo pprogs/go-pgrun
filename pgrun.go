@@ -41,10 +41,10 @@ func mainFunc() int {
 
 	lg = log.New(os.Stdout, "", log.LstdFlags|log.Lshortfile)
 
-	confFlag := flag.String("C", "config.json", "Path to config file")
-	dataFlag := flag.String("D", "", "Path to data file")
+	confFlag := flag.String("c", "config.json", "Path to config file")
+	dataFlag := flag.String("d", "", "Path to data file")
 
-	flag.Var(&vals, "V", "Set value. Must be in format -V name,value. Can be added multiple V flags")
+	flag.Var(&vals, "v", "Set value. Must be in format -V name,value. Can be added multiple V flags")
 
 	flag.Parse()
 
