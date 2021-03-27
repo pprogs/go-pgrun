@@ -1,6 +1,7 @@
 # GO-PGRUN
 
 Simple CLI tool to run sql commands from files against postgresql
+used for migrations
 
 Command line flags:
 ```
